@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stars Watcher</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2128;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #7d8590;
+      --accent: #58a6ff;
+      --star: #e3b341;
+      --green: #3fb950;
+      --red: #f85149;
+      --orange: #d29922;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    header .logo { font-size: 20px; }
+    header h1 { font-size: 15px; font-weight: 600; }
+    .rate-info {
+      margin-left: auto;
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .rate-info.no-token {
+      background: rgba(248,81,73,0.12);
+      color: var(--red);
+      border: 1px solid rgba(248,81,73,0.25);
+    }
+    .rate-info.with-token {
+      background: rgba(63,185,80,0.12);
+      color: var(--green);
+      border: 1px solid rgba(63,185,80,0.25);
+    }
+
+    /* ── Layout ── */
+    .app {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ── */
+    aside {
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .add-repo-form {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .add-repo-form form {
+      display: flex;
+      gap: 6px;
+    }
+    input[type="text"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      min-width: 0;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: var(--muted); }
+    .add-error {
+      color: var(--red);
+      font-size: 12px;
+      margin-top: 5px;
+      display: none;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      line-height: 1;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .btn:hover { background: #21262d; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0d1117;
+      font-weight: 600;
+    }
+    .btn-primary:hover { background: #79b8ff; border-color: #79b8ff; }
+    .btn-danger { color: var(--red); }
+    .btn-danger:hover { background: rgba(248,81,73,0.1); border-color: var(--red); }
+
+    .repo-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+    .repo-list-empty {
+      padding: 24px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+      line-height: 1.6;
+    }
+    .repo-item {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.1s;
+      position: relative;
+    }
+    .repo-item:hover { background: rgba(255,255,255,0.03); }
+    .repo-item.active {
+      background: rgba(88,166,255,0.08);
+      border-left: 3px solid var(--accent);
+      padding-left: 9px;
+    }
+    .repo-item-info { flex: 1; min-width: 0; }
+    .repo-item-name {
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .repo-item-name .owner { color: var(--muted); }
+    .repo-item-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .repo-item-sub .star-val { color: var(--star); }
+
+    /* ── Main ── */
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 28px;
+    }
+    .empty-state {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      text-align: center;
+      gap: 10px;
+    }
+    .empty-state .big-star { font-size: 52px; opacity: 0.3; }
+    .empty-state p { font-size: 14px; line-height: 1.6; }
+
+    /* ── Repo detail ── */
+    .repo-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .repo-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .repo-title a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .repo-title a:hover { text-decoration: underline; }
+    .repo-title .owner { color: var(--muted); font-weight: 400; }
+    .repo-meta { font-size: 12px; color: var(--muted); }
+
+    .star-count {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--star);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* ── Sync bar ── */
+    .sync-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .sync-progress {
+      flex: 1;
+      min-width: 140px;
+      display: none;
+    }
+    .sync-progress.visible { display: block; }
+    .sync-progress-track {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 4px;
+    }
+    .sync-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.25s ease;
+      width: 0%;
+    }
+    .sync-progress-text { font-size: 11px; color: var(--muted); }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .card-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .card-header-right { display: flex; align-items: center; gap: 6px; }
+    .card-body { padding: 16px; }
+
+    /* ── Chart ── */
+    .chart-container { position: relative; height: 240px; }
+    .granularity-group { display: flex; gap: 3px; }
+    .gran-btn {
+      padding: 3px 9px;
+      font-size: 12px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.1s;
+    }
+    .gran-btn:hover { color: var(--text); }
+    .gran-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0d1117;
+      font-weight: 600;
+    }
+    .coverage-note {
+      font-size: 12px;
+      padding: 7px 12px;
+      border-radius: 5px;
+      margin-bottom: 12px;
+    }
+    .coverage-note.partial {
+      background: rgba(210,153,34,0.12);
+      color: var(--orange);
+      border: 1px solid rgba(210,153,34,0.25);
+    }
+    .coverage-note.full {
+      background: rgba(63,185,80,0.08);
+      color: var(--green);
+      border: 1px solid rgba(63,185,80,0.18);
+    }
+    .no-data {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ── Stargazers ── */
+    .stargazers-list { display: flex; flex-direction: column; gap: 4px; }
+    .stargazer {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      transition: background 0.1s;
+    }
+    .stargazer:hover { background: rgba(255,255,255,0.04); }
+    .stargazer img {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--border);
+    }
+    .sg-info { flex: 1; min-width: 0; }
+    .sg-login {
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .sg-login a { color: var(--accent); text-decoration: none; }
+    .sg-login a:hover { text-decoration: underline; }
+    .sg-date { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    .sg-link {
+      font-size: 11px;
+      padding: 4px 9px;
+      flex-shrink: 0;
+    }
+
+    /* ── Toast ── */
+    #toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 999;
+    }
+    .toast {
+      padding: 9px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+      animation: slideIn 0.2s ease;
+      transition: opacity 0.3s;
+    }
+    .toast.success { border-color: var(--green); color: var(--green); }
+    .toast.error   { border-color: var(--red);   color: var(--red);   }
+    @keyframes slideIn {
+      from { transform: translateX(20px); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span class="logo">★</span>
+  <h1>Stars Watcher</h1>
+  <div id="rate-badge" class="rate-info no-token">loading…</div>
+</header>
+
+<div class="app">
+  <aside>
+    <div class="add-repo-form">
+      <form id="add-form">
+        <input type="text" id="repo-input" placeholder="owner/repo" autocomplete="off" spellcheck="false">
+        <button type="submit" class="btn btn-primary" id="add-btn">Add</button>
+      </form>
+      <div class="add-error" id="add-error"></div>
+    </div>
+    <div class="repo-list" id="repo-list"></div>
+  </aside>
+
+  <main id="main">
+    <div class="empty-state" id="empty-state">
+      <div class="big-star">★</div>
+      <p>Add a GitHub repo on the left<br>to start watching its stars.</p>
+    </div>
+    <div id="repo-detail" style="display:none"></div>
+  </main>
+</div>
+
+<div id="toast-container"></div>
+
+<script>
+'use strict';
+
+let repos = [];
+let selectedId = null;
+let starChart = null;
+let granularity = 'week';
+
+// ── Boot ──────────────────────────────────────────────────────────────
+async function init() {
+  loadStatus();
+  await loadRepos();
+}
+
+async function loadStatus() {
+  try {
+    const s = await apiFetch('/api/status');
+    const badge = document.getElementById('rate-badge');
+    if (s.token) {
+      badge.className = 'rate-info with-token';
+      badge.textContent = `Token ✓  ${s.remaining.toLocaleString()} / ${s.limit.toLocaleString()} req remaining`;
+    } else {
+      badge.className = 'rate-info no-token';
+      badge.textContent = 'No GITHUB_TOKEN — 60 req/hr limit';
+    }
+  } catch { /* ignore */ }
+}
+
+async function loadRepos() {
+  repos = await apiFetch('/api/repos');
+  renderSidebar();
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────
+function renderSidebar() {
+  const el = document.getElementById('repo-list');
+  if (repos.length === 0) {
+    el.innerHTML = '<div class="repo-list-empty">No repos yet.<br>Add one above.</div>';
+    return;
+  }
+  el.innerHTML = repos.map(r => `
+    <div class="repo-item ${r.id === selectedId ? 'active' : ''}"
+         onclick="selectRepo(${r.id})">
+      <div class="repo-item-info">
+        <div class="repo-item-name">
+          <span class="owner">${r.owner}/</span>${r.name}
+        </div>
+        <div class="repo-item-sub">
+          <span class="star-val">★ ${fmt(r.total_stars)}</span>
+          ${r.cached_stars ? `· ${fmt(r.cached_stars)} cached` : ''}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── Add repo ──────────────────────────────────────────────────────────
+document.getElementById('add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('repo-input');
+  const errEl = document.getElementById('add-error');
+  const btn   = document.getElementById('add-btn');
+  const slug  = input.value.trim();
+  if (!slug) return;
+
+  btn.disabled = true;
+  btn.textContent = '…';
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/repos', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({repo: slug})
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Failed to add repo';
+      errEl.style.display = 'block';
+    } else {
+      input.value = '';
+      await loadRepos();
+      selectRepo(data.id);
+    }
+  } catch {
+    errEl.textContent = 'Network error';
+    errEl.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Add';
+});
+
+// ── Select & render repo ──────────────────────────────────────────────
+async function selectRepo(id) {
+  selectedId = id;
+  renderSidebar();
+
+  const repo = repos.find(r => r.id === id);
+  if (!repo) return;
+
+  document.getElementById('empty-state').style.display = 'none';
+  const detail = document.getElementById('repo-detail');
+  detail.style.display = 'block';
+
+  renderDetail(repo);
+  await Promise.all([loadHistory(id), loadStargazers(id)]);
+}
+
+function renderDetail(repo) {
+  const syncedText = repo.last_synced
+    ? `Last synced ${relativeTime(repo.last_synced + 'Z')}`
+    : 'Never synced — click Quick Sync to start';
+
+  document.getElementById('repo-detail').innerHTML = `
+    <div class="repo-header">
+      <div>
+        <div class="repo-title">
+          <a href="https://github.com/${repo.owner}/${repo.name}" target="_blank" rel="noopener">
+            <span class="owner">${repo.owner} / </span>${repo.name}
+          </a>
+        </div>
+        <div class="repo-meta">${syncedText}</div>
+      </div>
+      <div class="star-count">★ ${fmt(repo.total_stars)}</div>
+    </div>
+
+    <div class="sync-bar">
+      <button class="btn btn-primary sync-btn" onclick="syncRepo('recent')">⟳ Quick Sync</button>
+      <button class="btn sync-btn" onclick="syncRepo('full')" title="Fetch complete star history (slow for popular repos)">Full Sync</button>
+      <button class="btn btn-danger" onclick="removeRepo(${repo.id})">Remove</button>
+      <div class="sync-progress" id="sync-progress">
+        <div class="sync-progress-track">
+          <div class="sync-progress-fill" id="sync-fill"></div>
+        </div>
+        <div class="sync-progress-text" id="sync-text"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        Star History
+        <div class="card-header-right">
+          <div class="granularity-group">
+            <button class="gran-btn ${granularity==='day'   ?'active':''}" onclick="setGran('day')">Day</button>
+            <button class="gran-btn ${granularity==='week'  ?'active':''}" onclick="setGran('week')">Week</button>
+            <button class="gran-btn ${granularity==='month' ?'active':''}" onclick="setGran('month')">Month</button>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="coverage-note"></div>
+        <div class="chart-container">
+          <canvas id="star-chart"></canvas>
+          <div class="no-data" id="chart-no-data" style="display:none">Sync to load history</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        Recent Stargazers
+        <span id="sg-count" style="font-size:12px;color:var(--muted);font-weight:400;"></span>
+      </div>
+      <div class="card-body" id="sg-body">
+        <div class="no-data" style="height:60px">Sync to load stargazers</div>
+      </div>
+    </div>
+  `;
+}
+
+// ── History chart ─────────────────────────────────────────────────────
+async function loadHistory(id) {
+  const repoId = id ?? selectedId;
+  if (!repoId) return;
+  const data = await apiFetch(`/api/repos/${repoId}/history?granularity=${granularity}`);
+
+  // Coverage note
+  const noteEl = document.getElementById('coverage-note');
+  if (noteEl) {
+    if (data.cached_stars === 0) {
+      noteEl.innerHTML = '';
+    } else if (data.cached_stars < data.total_stars) {
+      const pct = Math.round(data.cached_stars / data.total_stars * 100);
+      noteEl.innerHTML = `<div class="coverage-note partial">
+        Showing ${fmt(data.cached_stars)} of ${fmt(data.total_stars)} stars (${pct}%).
+        Run <strong>Full Sync</strong> for complete history.
+      </div>`;
+    } else {
+      noteEl.innerHTML = `<div class="coverage-note full">
+        Complete history · ${fmt(data.cached_stars)} stars
+      </div>`;
+    }
+  }
+
+  const canvas = document.getElementById('star-chart');
+  const noData = document.getElementById('chart-no-data');
+  if (!canvas || !noData) return;
+
+  if (data.history.length === 0) {
+    canvas.style.display = 'none';
+    noData.style.display = 'flex';
+    return;
+  }
+  canvas.style.display = 'block';
+  noData.style.display = 'none';
+
+  if (starChart) { starChart.destroy(); starChart = null; }
+
+  starChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: data.history.map(d => d.period),
+      datasets: [
+        {
+          type: 'line',
+          label: 'Total Stars',
+          data: data.history.map(d => d.cumulative),
+          borderColor: '#58a6ff',
+          backgroundColor: 'rgba(88,166,255,0.08)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: data.history.length > 80 ? 0 : 2,
+          borderWidth: 2,
+          yAxisID: 'yRight',
+          order: 0,
+        },
+        {
+          type: 'bar',
+          label: 'New Stars',
+          data: data.history.map(d => d.new),
+          backgroundColor: 'rgba(227,179,65,0.55)',
+          borderColor: 'rgba(227,179,65,0.8)',
+          borderWidth: 1,
+          yAxisID: 'yLeft',
+          order: 1,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#7d8590', font: { size: 12 }, boxWidth: 12, boxHeight: 12 }
+        },
+        tooltip: {
+          backgroundColor: '#161b22',
+          borderColor: '#30363d',
+          borderWidth: 1,
+          titleColor: '#e6edf3',
+          bodyColor: '#7d8590',
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#7d8590', maxTicksLimit: 12, font: { size: 11 } },
+          grid: { color: '#21262d' }
+        },
+        yLeft: {
+          position: 'left',
+          ticks: { color: '#e3b341', font: { size: 11 } },
+          grid: { color: '#21262d' },
+          title: { display: true, text: 'New Stars', color: '#e3b341', font: { size: 11 } }
+        },
+        yRight: {
+          position: 'right',
+          ticks: { color: '#58a6ff', font: { size: 11 } },
+          grid: { drawOnChartArea: false },
+          title: { display: true, text: 'Total Stars', color: '#58a6ff', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+async function setGran(g) {
+  granularity = g;
+  document.querySelectorAll('.gran-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase() === g);
+  });
+  await loadHistory();
+}
+
+// ── Stargazers ────────────────────────────────────────────────────────
+async function loadStargazers(id) {
+  const repoId = id ?? selectedId;
+  if (!repoId) return;
+  const list = await apiFetch(`/api/repos/${repoId}/stargazers?limit=100`);
+
+  const countEl = document.getElementById('sg-count');
+  const bodyEl  = document.getElementById('sg-body');
+  if (!countEl || !bodyEl) return;
+
+  if (list.length === 0) {
+    countEl.textContent = '';
+    bodyEl.innerHTML = '<div class="no-data" style="height:60px">Sync to load stargazers</div>';
+    return;
+  }
+
+  countEl.textContent = `${list.length} most recent`;
+  bodyEl.innerHTML = `<div class="stargazers-list">
+    ${list.map(sg => `
+      <div class="stargazer">
+        <img src="${sg.avatar_url}&s=72" alt="${sg.login}" loading="lazy">
+        <div class="sg-info">
+          <div class="sg-login">
+            <a href="https://github.com/${sg.login}" target="_blank" rel="noopener">@${sg.login}</a>
+          </div>
+          <div class="sg-date">${relativeTime(sg.starred_at)}</div>
+        </div>
+        <a href="https://github.com/${sg.login}" target="_blank" rel="noopener" class="btn sg-link">View →</a>
+      </div>
+    `).join('')}
+  </div>`;
+}
+
+// ── Sync ──────────────────────────────────────────────────────────────
+async function syncRepo(mode) {
+  const repo = repos.find(r => r.id === selectedId);
+  if (!repo) return;
+
+  const progressEl = document.getElementById('sync-progress');
+  const fillEl     = document.getElementById('sync-fill');
+  const textEl     = document.getElementById('sync-text');
+  const syncBtns   = document.querySelectorAll('.sync-btn');
+
+  syncBtns.forEach(b => b.disabled = true);
+  if (progressEl) { progressEl.classList.add('visible'); }
+  if (fillEl)  fillEl.style.width = '0%';
+  if (textEl)  textEl.textContent = 'Connecting…';
+
+  let done = false;
+  let result = null;
+  let errorMsg = null;
+
+  try {
+    const response = await fetch(`/api/repos/${repo.id}/sync?mode=${mode}`, { method: 'POST' });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    outer: while (true) {
+      const { value, done: streamDone } = await reader.read();
+      if (streamDone) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(5).trim()); } catch { continue; }
+
+        if (evt.error) {
+          errorMsg = evt.error;
+          break outer;
+        }
+        if (evt.progress) {
+          if (textEl) textEl.textContent = evt.progress;
+          if (fillEl && evt.current && evt.total) {
+            fillEl.style.width = `${Math.round(evt.current / evt.total * 100)}%`;
+          }
+        }
+        if (evt.done) {
+          done = true;
+          result = evt;
+          if (fillEl) fillEl.style.width = '100%';
+          if (textEl) textEl.textContent = `✓ ${result.new_count} new stars fetched`;
+          break outer;
+        }
+      }
+    }
+  } catch (e) {
+    errorMsg = e.message;
+  }
+
+  if (errorMsg) {
+    showToast('Sync failed: ' + errorMsg, 'error');
+    if (textEl) textEl.textContent = 'Sync failed';
+    syncBtns.forEach(b => b.disabled = false);
+    return;
+  }
+
+  if (done) {
+    showToast(`Synced — ${result.new_count} new stars added`, 'success');
+    await loadRepos();
+    const freshRepo = repos.find(r => r.id === selectedId);
+    if (freshRepo) {
+      renderDetail(freshRepo);
+      await Promise.all([loadHistory(selectedId), loadStargazers(selectedId)]);
+    }
+    loadStatus();
+  }
+}
+
+// ── Remove repo ───────────────────────────────────────────────────────
+async function removeRepo(id) {
+  if (!confirm('Remove this repo and all cached star data?')) return;
+  await fetch(`/api/repos/${id}`, { method: 'DELETE' });
+  selectedId = null;
+  if (starChart) { starChart.destroy(); starChart = null; }
+  document.getElementById('empty-state').style.display = 'flex';
+  document.getElementById('repo-detail').style.display = 'none';
+  await loadRepos();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+async function apiFetch(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function fmt(n) {
+  if (n == null) return '0';
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return n.toLocaleString();
+}
+
+function relativeTime(isoStr) {
+  const d = new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z');
+  const diff = Date.now() - d.getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins  <  1) return 'just now';
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days  <  7) return `${days}d ago`;
+  if (days  < 30) return `${Math.floor(days / 7)}w ago`;
+  if (days  < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+function showToast(msg, type = '') {
+  const container = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.style.opacity = '0';
+    setTimeout(() => t.remove(), 300);
+  }, 3500);
+}
+
+// ── Go ────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
