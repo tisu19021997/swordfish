@@ -36,10 +36,18 @@ def init_db():
             login TEXT NOT NULL,
             avatar_url TEXT,
             starred_at TEXT NOT NULL,
+            followers INTEGER,
+            following INTEGER,
             UNIQUE(repo_id, login),
             FOREIGN KEY(repo_id) REFERENCES repos(id)
         );
     ''')
+    # Safe migration for existing DBs that don't have the new columns yet
+    for col in ['followers INTEGER', 'following INTEGER']:
+        try:
+            conn.execute(f'ALTER TABLE stars ADD COLUMN {col}')
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
@@ -235,12 +243,55 @@ def get_stargazers(repo_id):
     limit = min(int(request.args.get('limit', 100)), 500)
     conn = get_db()
     rows = conn.execute(
-        'SELECT login, avatar_url, starred_at FROM stars WHERE repo_id=? '
+        'SELECT login, avatar_url, starred_at, followers, following FROM stars WHERE repo_id=? '
         'ORDER BY starred_at DESC LIMIT ?',
         (repo_id, limit)
     ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/repos/<int:repo_id>/enrich', methods=['POST'])
+def enrich_profiles(repo_id):
+    limit = min(int(request.args.get('limit', 100)), 200)
+
+    @stream_with_context
+    def generate():
+        conn = get_db()
+        rows = conn.execute(
+            'SELECT login FROM stars WHERE repo_id=? AND followers IS NULL '
+            'ORDER BY starred_at DESC LIMIT ?',
+            (repo_id, limit)
+        ).fetchall()
+        conn.close()
+
+        logins = [r['login'] for r in rows]
+        if not logins:
+            yield sse({'done': True, 'enriched': 0, 'message': 'All profiles already loaded'})
+            return
+
+        headers = gh_headers(with_star=False)
+        enriched = 0
+
+        for i, login in enumerate(logins):
+            yield sse({'progress': f'Fetching @{login}…', 'current': i + 1, 'total': len(logins)})
+            r = requests.get(f'https://api.github.com/users/{login}',
+                             headers=headers, timeout=10)
+            if r.ok:
+                u = r.json()
+                conn = get_db()
+                conn.execute(
+                    'UPDATE stars SET followers=?, following=? WHERE repo_id=? AND login=?',
+                    (u.get('followers', 0), u.get('following', 0), repo_id, login)
+                )
+                conn.commit()
+                conn.close()
+                enriched += 1
+
+        yield sse({'done': True, 'enriched': enriched})
+
+    return Response(generate(), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
 @app.route('/api/repos/<int:repo_id>/history')

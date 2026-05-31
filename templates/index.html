@@ -586,7 +586,16 @@ function renderDetail(repo) {
     <div class="card">
       <div class="card-header">
         Recent Stargazers
-        <span id="sg-count" style="font-size:12px;color:var(--muted);font-weight:400;"></span>
+        <div class="card-header-right">
+          <span id="sg-count" style="font-size:12px;color:var(--muted);font-weight:400;"></span>
+          <button class="btn" id="enrich-btn" onclick="enrichProfiles()" style="font-size:12px;padding:3px 10px;display:none;">
+            Load Profiles
+          </button>
+        </div>
+      </div>
+      <div id="enrich-progress" style="display:none;padding:6px 16px;border-bottom:1px solid var(--border);">
+        <div class="sync-progress-track"><div class="sync-progress-fill" id="enrich-fill"></div></div>
+        <div class="sync-progress-text" id="enrich-text"></div>
       </div>
       <div class="card-body" id="sg-body">
         <div class="no-data" style="height:60px">Sync to load stargazers</div>
@@ -718,31 +727,106 @@ async function loadStargazers(id) {
   if (!repoId) return;
   const list = await apiFetch(`/api/repos/${repoId}/stargazers?limit=100`);
 
-  const countEl = document.getElementById('sg-count');
-  const bodyEl  = document.getElementById('sg-body');
+  const countEl   = document.getElementById('sg-count');
+  const bodyEl    = document.getElementById('sg-body');
+  const enrichBtn = document.getElementById('enrich-btn');
   if (!countEl || !bodyEl) return;
 
   if (list.length === 0) {
     countEl.textContent = '';
+    if (enrichBtn) enrichBtn.style.display = 'none';
     bodyEl.innerHTML = '<div class="no-data" style="height:60px">Sync to load stargazers</div>';
     return;
   }
 
+  const missingProfiles = list.filter(sg => sg.followers == null).length;
+  if (enrichBtn) enrichBtn.style.display = missingProfiles > 0 ? 'inline-flex' : 'none';
   countEl.textContent = `${list.length} most recent`;
+
   bodyEl.innerHTML = `<div class="stargazers-list">
-    ${list.map(sg => `
-      <div class="stargazer">
-        <img src="${sg.avatar_url}&s=72" alt="${sg.login}" loading="lazy">
-        <div class="sg-info">
-          <div class="sg-login">
-            <a href="https://github.com/${sg.login}" target="_blank" rel="noopener">@${sg.login}</a>
+    ${list.map(sg => {
+      const hasProfile = sg.followers != null;
+      const profileStats = hasProfile
+        ? `<span title="Followers">👥 ${fmt(sg.followers)}</span> <span style="color:var(--border)">·</span> <span title="Following">➜ ${fmt(sg.following)}</span>`
+        : `<span style="color:var(--border)">profile not loaded</span>`;
+      return `
+        <div class="stargazer">
+          <img src="${sg.avatar_url}&s=72" alt="${sg.login}" loading="lazy">
+          <div class="sg-info">
+            <div class="sg-login">
+              <a href="https://github.com/${sg.login}" target="_blank" rel="noopener">@${sg.login}</a>
+            </div>
+            <div class="sg-date">${relativeTime(sg.starred_at)} &nbsp;·&nbsp; ${profileStats}</div>
           </div>
-          <div class="sg-date">${relativeTime(sg.starred_at)}</div>
-        </div>
-        <a href="https://github.com/${sg.login}" target="_blank" rel="noopener" class="btn sg-link">View →</a>
-      </div>
-    `).join('')}
+          <a href="https://github.com/${sg.login}" target="_blank" rel="noopener" class="btn sg-link">View →</a>
+        </div>`;
+    }).join('')}
   </div>`;
+}
+
+// ── Enrich profiles ───────────────────────────────────────────────────
+async function enrichProfiles() {
+  const repoId = selectedId;
+  if (!repoId) return;
+
+  const enrichBtn  = document.getElementById('enrich-btn');
+  const progressEl = document.getElementById('enrich-progress');
+  const fillEl     = document.getElementById('enrich-fill');
+  const textEl     = document.getElementById('enrich-text');
+
+  if (enrichBtn)  enrichBtn.disabled = true;
+  if (progressEl) progressEl.style.display = 'block';
+  if (fillEl)     fillEl.style.width = '0%';
+  if (textEl)     textEl.textContent = 'Starting…';
+
+  let done = false;
+  let enriched = 0;
+
+  try {
+    const response = await fetch(`/api/repos/${repoId}/enrich`, { method: 'POST' });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    outer: while (true) {
+      const { value, streamDone } = await reader.read();
+      if (streamDone) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(5).trim()); } catch { continue; }
+
+        if (evt.progress) {
+          if (textEl) textEl.textContent = evt.progress;
+          if (fillEl && evt.current && evt.total)
+            fillEl.style.width = `${Math.round(evt.current / evt.total * 100)}%`;
+        }
+        if (evt.done) {
+          done = true;
+          enriched = evt.enriched;
+          if (fillEl) fillEl.style.width = '100%';
+          if (textEl) textEl.textContent = evt.message || `✓ ${enriched} profiles loaded`;
+          break outer;
+        }
+      }
+    }
+  } catch (e) {
+    showToast('Enrich failed: ' + e.message, 'error');
+  }
+
+  if (done) {
+    await loadStargazers();
+    if (enriched > 0) showToast(`Loaded ${enriched} profiles`, 'success');
+  }
+
+  setTimeout(() => {
+    if (progressEl) progressEl.style.display = 'none';
+    if (enrichBtn)  enrichBtn.disabled = false;
+  }, 2000);
 }
 
 // ── Sync ──────────────────────────────────────────────────────────────
