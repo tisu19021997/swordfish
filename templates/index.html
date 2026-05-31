@@ -636,7 +636,7 @@ async function loadHistory(id) {
   starChart = new Chart(canvas, {
     type: 'bar',
     data: {
-      labels: data.history.map(d => d.period),
+      labels: data.history.map(d => formatPeriod(d.period, granularity)),
       datasets: [
         {
           type: 'line',
@@ -840,6 +840,18 @@ async function apiFetch(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
+}
+
+// period is always YYYY-MM-DD (day/week) or YYYY-MM (month)
+function formatPeriod(period, gran) {
+  if (gran === 'month') {
+    const [y, m] = period.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en', { month: 'short', year: '2-digit' });
+  }
+  // day or week: YYYY-MM-DD (week returns its Monday)
+  const [y, m, d] = period.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString('en', { month: 'short', day: 'numeric', year: '2-digit' });
 }
 
 function fmt(n) {

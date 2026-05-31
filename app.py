@@ -246,14 +246,23 @@ def get_stargazers(repo_id):
 @app.route('/api/repos/<int:repo_id>/history')
 def get_history(repo_id):
     granularity = request.args.get('granularity', 'week')
-    fmt = {'day': '%Y-%m-%d', 'week': '%Y-%W', 'month': '%Y-%m'}.get(granularity, '%Y-%W')
 
     conn = get_db()
-    rows = conn.execute(
-        f"SELECT strftime('{fmt}', starred_at) AS period, COUNT(*) AS count "
-        f"FROM stars WHERE repo_id=? GROUP BY period ORDER BY period",
-        (repo_id,)
-    ).fetchall()
+    if granularity == 'week':
+        # Return the Monday of each week as YYYY-MM-DD so the frontend gets real dates
+        rows = conn.execute(
+            "SELECT date(starred_at, '-' || CAST((CAST(strftime('%w', starred_at) AS INTEGER) + 6) % 7 AS TEXT) || ' days') AS period, "
+            "COUNT(*) AS count "
+            "FROM stars WHERE repo_id=? GROUP BY period ORDER BY period",
+            (repo_id,)
+        ).fetchall()
+    else:
+        fmt = {'day': '%Y-%m-%d', 'month': '%Y-%m'}.get(granularity, '%Y-%m-%d')
+        rows = conn.execute(
+            f"SELECT strftime('{fmt}', starred_at) AS period, COUNT(*) AS count "
+            f"FROM stars WHERE repo_id=? GROUP BY period ORDER BY period",
+            (repo_id,)
+        ).fetchall()
     repo = conn.execute('SELECT total_stars, last_synced FROM repos WHERE id=?', (repo_id,)).fetchone()
     cached = conn.execute('SELECT COUNT(*) FROM stars WHERE repo_id=?', (repo_id,)).fetchone()[0]
     conn.close()
