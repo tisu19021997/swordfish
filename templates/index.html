@@ -457,6 +457,7 @@ async function loadStatus() {
 async function loadRepos() {
   repos = await apiFetch('/api/repos');
   renderSidebar();
+  if (repos.length > 0 && !selectedId) selectRepo(repos[0].id);
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────
