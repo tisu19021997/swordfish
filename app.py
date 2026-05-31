@@ -3,6 +3,7 @@ import os
 import requests
 import json
 from math import ceil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -253,7 +254,8 @@ def get_stargazers(repo_id):
 
 @app.route('/api/repos/<int:repo_id>/enrich', methods=['POST'])
 def enrich_profiles(repo_id):
-    limit = min(int(request.args.get('limit', 100)), 200)
+    limit      = min(int(request.args.get('limit', 100)), 200)
+    batch_size = min(int(request.args.get('batch', 10)), 20)
 
     @stream_with_context
     def generate():
@@ -270,23 +272,43 @@ def enrich_profiles(repo_id):
             yield sse({'done': True, 'enriched': 0, 'message': 'All profiles already loaded'})
             return
 
-        headers = gh_headers(with_star=False)
+        headers  = gh_headers(with_star=False)
+        total    = len(logins)
         enriched = 0
+        batches  = [logins[i:i + batch_size] for i in range(0, total, batch_size)]
 
-        for i, login in enumerate(logins):
-            yield sse({'progress': f'Fetching @{login}…', 'current': i + 1, 'total': len(logins)})
-            r = requests.get(f'https://api.github.com/users/{login}',
-                             headers=headers, timeout=10)
-            if r.ok:
-                u = r.json()
-                conn = get_db()
-                conn.execute(
-                    'UPDATE stars SET followers=?, following=? WHERE repo_id=? AND login=?',
-                    (u.get('followers', 0), u.get('following', 0), repo_id, login)
-                )
-                conn.commit()
-                conn.close()
-                enriched += 1
+        def fetch_user(login):
+            try:
+                r = requests.get(f'https://api.github.com/users/{login}',
+                                 headers=headers, timeout=10)
+                if r.ok:
+                    u = r.json()
+                    return (login, u.get('followers', 0), u.get('following', 0))
+            except Exception:
+                pass
+            return None
+
+        for i, batch in enumerate(batches):
+            yield sse({
+                'progress': f'Batch {i + 1}/{len(batches)} — fetching {len(batch)} profiles…',
+                'current': i * batch_size,
+                'total': total,
+            })
+
+            with ThreadPoolExecutor(max_workers=batch_size) as pool:
+                results = list(pool.map(fetch_user, batch))
+
+            conn = get_db()
+            for result in results:
+                if result:
+                    login, followers, following = result
+                    conn.execute(
+                        'UPDATE stars SET followers=?, following=? WHERE repo_id=? AND login=?',
+                        (followers, following, repo_id, login)
+                    )
+                    enriched += 1
+            conn.commit()
+            conn.close()
 
         yield sse({'done': True, 'enriched': enriched})
 
