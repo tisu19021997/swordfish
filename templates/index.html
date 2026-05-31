@@ -431,6 +431,8 @@ let repos = [];
 let selectedId = null;
 let starChart = null;
 let granularity = 'week';
+let sgSort = 'recent';
+let sgCache = [];
 
 // ── Boot ──────────────────────────────────────────────────────────────
 async function init() {
@@ -597,6 +599,14 @@ function renderDetail(repo) {
         <div class="sync-progress-track"><div class="sync-progress-fill" id="enrich-fill"></div></div>
         <div class="sync-progress-text" id="enrich-text"></div>
       </div>
+      <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">
+        <span style="font-size:12px;color:var(--muted);">Sort:</span>
+        <div class="granularity-group" id="sg-sort-btns">
+          <button class="gran-btn active" onclick="setSgSort('recent')">Recent</button>
+          <button class="gran-btn" onclick="setSgSort('followers')">Followers</button>
+          <button class="gran-btn" onclick="setSgSort('following')">Following</button>
+        </div>
+      </div>
       <div class="card-body" id="sg-body">
         <div class="no-data" style="height:60px">Sync to load stargazers</div>
       </div>
@@ -725,30 +735,46 @@ async function setGran(g) {
 async function loadStargazers(id) {
   const repoId = id ?? selectedId;
   if (!repoId) return;
-  const list = await apiFetch(`/api/repos/${repoId}/stargazers?limit=100`);
+  sgCache = await apiFetch(`/api/repos/${repoId}/stargazers?limit=100`);
+  renderStargazers();
+}
 
+function setSgSort(sort) {
+  sgSort = sort;
+  document.querySelectorAll('#sg-sort-btns .gran-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent.toLowerCase() === sort);
+  });
+  renderStargazers();
+}
+
+function renderStargazers() {
   const countEl   = document.getElementById('sg-count');
   const bodyEl    = document.getElementById('sg-body');
   const enrichBtn = document.getElementById('enrich-btn');
-  if (!countEl || !bodyEl) return;
+  if (!bodyEl) return;
 
-  if (list.length === 0) {
-    countEl.textContent = '';
+  if (sgCache.length === 0) {
+    if (countEl)   countEl.textContent = '';
     if (enrichBtn) enrichBtn.style.display = 'none';
     bodyEl.innerHTML = '<div class="no-data" style="height:60px">Sync to load stargazers</div>';
     return;
   }
 
-  const missingProfiles = list.filter(sg => sg.followers == null).length;
+  const missingProfiles = sgCache.filter(sg => sg.followers == null).length;
   if (enrichBtn) enrichBtn.style.display = missingProfiles > 0 ? 'inline-flex' : 'none';
-  countEl.textContent = `${list.length} most recent`;
+  if (countEl)   countEl.textContent = `${sgCache.length} most recent`;
+
+  const sorted = [...sgCache].sort((a, b) => {
+    if (sgSort === 'followers') return (b.followers ?? -1) - (a.followers ?? -1);
+    if (sgSort === 'following') return (b.following ?? -1) - (a.following ?? -1);
+    return 0; // 'recent' — already in DESC order from the API
+  });
 
   bodyEl.innerHTML = `<div class="stargazers-list">
-    ${list.map(sg => {
-      const hasProfile = sg.followers != null;
-      const profileStats = hasProfile
-        ? `<span title="Followers">👥 ${fmt(sg.followers)}</span> <span style="color:var(--border)">·</span> <span title="Following">➜ ${fmt(sg.following)}</span>`
-        : `<span style="color:var(--border)">profile not loaded</span>`;
+    ${sorted.map(sg => {
+      const profileStats = sg.followers != null
+        ? `${fmt(sg.followers)} followers · ${fmt(sg.following)} following`
+        : `<span style="color:var(--border)">—</span>`;
       return `
         <div class="stargazer">
           <img src="${sg.avatar_url}&s=72" alt="${sg.login}" loading="lazy">
@@ -819,7 +845,7 @@ async function enrichProfiles() {
   }
 
   if (done) {
-    await loadStargazers();
+    await loadStargazers(); // re-fetch to get fresh followers/following from DB
     if (enriched > 0) showToast(`Loaded ${enriched} profiles`, 'success');
   }
 
